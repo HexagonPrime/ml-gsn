@@ -3,6 +3,7 @@ from torch.utils.data import DataLoader
 
 from datasets.vizdoom import VizdoomDataset
 from datasets.replica import ReplicaDataset
+from datasets.realestate10k import Realestate10kDataset
 import pytorch_lightning as pl
 
 
@@ -10,6 +11,7 @@ def build_dataloader(data_config, verbose=True):
     datasets = {
         'vizdoom': VizdoomDataset,
         'replica_all': ReplicaDataset,
+        'realestate10k': Realestate10kDataset,
     }
 
     if 'train_set_config' not in data_config.keys():

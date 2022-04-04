@@ -12,7 +12,7 @@ import torchvision.transforms as transforms
 from .dataset_utils import normalize_trajectory, random_rotation_augment
 
 
-class RealestateDataset(Dataset):
+class Realestate10kDataset(Dataset):
     def __init__(
         self,
         data_dir="/scratch_net/biwidl212_second/shecai/RealEstate10K-subset/",
@@ -38,7 +38,7 @@ class RealestateDataset(Dataset):
         self.depth = depth
         self.center = center
         self.normalize_rotation = normalize_rotation
-        self.seq_idxs = os.listdir(self.datapath)  # 008ec1473e4ce029, etc.
+        self.seq_idxs = os.listdir(os.path.join(self.datapath, "frames"))  # 008ec1473e4ce029, etc.
         self.rot_aug = rot_aug
         self.single_sample_per_trajectory = single_sample_per_trajectory
         self.samples_per_epoch = samples_per_epoch
@@ -59,7 +59,7 @@ class RealestateDataset(Dataset):
             for i, line in enumerate(f):
                 if i == 0:
                     continue
-                episode_Rt.append(torch.Tensor(cameras[i]['Rt']))
+                # episode_Rt.append(torch.Tensor(cameras[i]['Rt']))
                 entry = [float(x) for x in line.split()]
                 # id = int(entry[0])
                 fx, fy, cx, cy = entry[1:5]
@@ -69,7 +69,9 @@ class RealestateDataset(Dataset):
                               [0, 0, 0, 1]],
                               dtype=np.float32)
                 w2c_mat = np.array(entry[7:]).reshape(3, 4)
-                episode_Rt.append(torch.Tensor(w2c_mat))
+                w2c_mat_4x4 = np.eye(4)
+                w2c_mat_4x4[:3, :] = w2c_mat
+                episode_Rt.append(torch.Tensor(w2c_mat_4x4))
                 # w2c_mat_4x4 = np.eye(4)
                 # w2c_mat_4x4[:3, :] = w2c_mat
                 # w2c_mat = w2c_mat_4x4
@@ -83,12 +85,13 @@ class RealestateDataset(Dataset):
 
             trim = episode_Rt.shape[0] % (self.seq_len * self.step)
             episode_Rt = episode_Rt[: episode_Rt.shape[0] - trim]
+            episode_Rt = episode_Rt.view(-1, self.seq_len, self.step, 4, 4).permute(0, 2, 1, 3, 4).reshape(-1, self.seq_len, 4, 4)
             Rt.append(episode_Rt)
 
-        Rt = torch.stack(Rt, dim=0)
+        Rt = torch.cat(Rt, dim=0)
 
         # this basically samples points at the stride length
-        Rt = Rt.view(-1, self.seq_len, self.step, 4, 4).permute(0, 2, 1, 3, 4).reshape(-1, self.seq_len, 4, 4)
+        # Rt = Rt.view(-1, self.seq_len, self.step, 4, 4).permute(0, 2, 1, 3, 4).reshape(-1, self.seq_len, 4, 4)
 
         if self.center is not None:
             Rt = normalize_trajectory(Rt, center=self.center, normalize_rotation=self.normalize_rotation)
@@ -115,26 +118,32 @@ class RealestateDataset(Dataset):
     def __getitem__(self, idx):
         random.seed()
 
+        idx = random.randint(0, len(self.seq_idxs) - 1)
         idxstr = self.seq_idxs[idx]
         # Load cameras
         episode_camera_path = os.path.join(self.datapath, "cameras")
         episode_camera_path = os.path.join(episode_camera_path, idxstr + '.txt')
-        f = open(os.path.join(episode_path, idxstr + '.txt'), 'r')
+        f = open(episode_camera_path, 'r')
         cameras = f.readlines()
+        cameras = cameras[1:]
         self.episode_len = len(cameras) - 1
 
-        if self.samples_per_epoch:
-            idx = random.randint(0, len(self.seq_idxs) - 1)
-            idxstr = self.seq_idxs[idx]
-            # Choose random start point (first ~50 frames have no movement)
-            # seq_start = random.randint(50, self.episode_len + 50 - (self.seq_len * self.step))
-            seq_start = random.randint(0, self.episode_len - (self.seq_len * self.step))
-        else:
-            seq_idx = math.floor(idx / (self.episode_len / (self.seq_len * self.step)))
-            seq_idx = int(self.seq_idxs[seq_idx])
-            seq_start = ((idx % (self.episode_len / (self.seq_len * self.step))) * (self.seq_len * self.step)) + 50
-            seq_start = int(seq_start)
-            idxstr = str(seq_idx).zfill(2)
+        # if self.samples_per_epoch:
+        #     idx = random.randint(0, len(self.seq_idxs) - 1)
+        #     idxstr = self.seq_idxs[idx]
+        #     # Choose random start point (first ~50 frames have no movement)
+        #     # seq_start = random.randint(50, self.episode_len + 50 - (self.seq_len * self.step))
+        #     seq_start = random.randint(0, self.episode_len - (self.seq_len * self.step))
+        # else:
+        #     seq_idx = math.floor(idx / (self.episode_len / (self.seq_len * self.step)))
+        #     seq_idx = int(self.seq_idxs[seq_idx])
+        #     seq_start = ((idx % (self.episode_len / (self.seq_len * self.step))) * (self.seq_len * self.step)) + 50
+        #     seq_start = int(seq_start)
+        #     idxstr = str(seq_idx).zfill(2)
+        # Choose random start point (first ~50 frames have no movement)
+        # seq_start = random.randint(50, self.episode_len + 50 - (self.seq_len * self.step))
+        seq_start = random.randint(0, self.episode_len - (self.seq_len * self.step))
+        # print(idxstr)
         
 
         # episode_path = os.path.join(self.datapath, idxstr)
@@ -149,7 +158,7 @@ class RealestateDataset(Dataset):
         frames_path = os.path.join(frames_path, idxstr)
         frames_path = os.path.join(frames_path, "outputs")
         for idx, i in enumerate(range(seq_start, seq_start + (self.seq_len * self.step), self.step)):
-            line = cameras[idx]
+            line = cameras[i]
             entry = [float(x) for x in line.split()]
             frame_time_stamp = int(entry[0])
             fx, fy, cx, cy = entry[1:5]
@@ -159,20 +168,25 @@ class RealestateDataset(Dataset):
                                [0, 0, 0, 1]],
                                dtype=np.float32)
             w2c_mat = np.array(entry[7:]).reshape(3, 4)
-            Rt.append(torch.Tensor(w2c_mat))
+            w2c_mat_4x4 = np.eye(4)
+            w2c_mat_4x4[:3, :] = w2c_mat
+            Rt.append(torch.Tensor(w2c_mat_4x4))
             K.append(torch.Tensor(this_K))
 
             # _rgb = os.path.join(episode_path, str(i).zfill(3) + '_rgb.png')
-            _rgb = os.path.join(frames_path, frame_time_stamp + '.png')
+            _rgb = os.path.join(frames_path, str(frame_time_stamp) + '.png')
             _rgb = self.resize_transform_rgb(Image.open(_rgb))
             rgb.append(_rgb)
 
             if self.depth:
                 # _depth = os.path.join(episode_path, str(i).zfill(3) + '_depth.png')
-                _rgb = os.path.join(frames_path, frame_time_stamp + '-depth_raw.png')
+                _depth = os.path.join(frames_path, str(frame_time_stamp) + '-depth_raw.png')
                 # We dont want to normalize depth values
                 _depth = self.resize_transform_depth(Image.open(_depth))
-                depth.append(torch.from_numpy(np.array(_depth)).unsqueeze(0))
+                _depth = torch.from_numpy(np.array(_depth)).unsqueeze(0)
+                _depth = (_depth - _depth.min()) / (_depth.max() - _depth.min())
+                _depth = _depth * 19.2
+                depth.append(_depth)
 
         rgb = torch.stack(rgb)
         depth = torch.stack(depth).float()

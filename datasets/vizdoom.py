@@ -60,15 +60,19 @@ class VizdoomDataset(Dataset):
                 for i in range(50, self.episode_len + 50):
                     episode_Rt.append(torch.Tensor(cameras[i]['Rt']))
             episode_Rt = torch.stack(episode_Rt, dim=0)
+            print(episode_Rt.shape)
 
             trim = episode_Rt.shape[0] % (self.seq_len * self.step)
             episode_Rt = episode_Rt[: episode_Rt.shape[0] - trim]
+            print(episode_Rt.shape)
             Rt.append(episode_Rt)
 
         Rt = torch.stack(Rt, dim=0)
+        print(Rt.shape)
 
         # this basically samples points at the stride length
         Rt = Rt.view(-1, self.seq_len, self.step, 4, 4).permute(0, 2, 1, 3, 4).reshape(-1, self.seq_len, 4, 4)
+        print(Rt.shape)
 
         if self.center is not None:
             Rt = normalize_trajectory(Rt, center=self.center, normalize_rotation=self.normalize_rotation)
